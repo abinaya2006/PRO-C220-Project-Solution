@@ -1,38 +1,76 @@
-const express = require("express");
-const app = express();
-const server = require("http").Server(app);
-app.set("view engine", "ejs");
-app.use(express.static("public"));
-app.use(express.json())
+const socket = io("/") 
 
-const { v4: uuidv4 } = require("uuid");
+var peer = new Peer(undefined, {
+    path: "/peerjs",
+    host: "/",
+    port: "443",
+}) 
 
-const io = require("socket.io")(server, {
-    cors: {
-        origin: '*'
-    }
-});
+const myVideo = document.createElement("video") 
+myVideo.muted = true
 
-const { ExpressPeerServer } = require("peer");
-const peerServer = ExpressPeerServer(server, {
-    debug: true,
-});
+let myStream 
 
-app.use("/peerjs", peerServer);
-
-app.get("/", (req, res) => {
-    res.redirect(`/${uuidv4()}`);
-});
-
-app.get("/:room", (req, res) => {
-    res.render("index", { roomId: req.params.room });
-});
-
-io.on("connection", (socket) => {
-    socket.on("join-room", (roomId, userId) => {
-        socket.join(roomId);
-        io.to(roomId).emit("user-connected", userId);
+navigator.mediaDevices
+    .getUserMedia({
+        audio: true,
+        video: false,
     })
-});
+    .then((stream) => {
+        myStream = stream
+        addVideoStream(myVideo, stream) 
 
-server.listen(process.env.PORT || 3030);
+        socket.on("user-connected", (userId) => {
+            connectToNewUser(userId, stream)
+        }) 
+
+        peer.on("call", (call) => {
+            call.answer(stream) 
+            const video = document.createElement("video") 
+            call.on("stream", (userVideoStream) => {
+                addVideoStream(video, userVideoStream) 
+            }) 
+        }) 
+    })
+
+function connectToNewUser(userId, stream) {
+    const call = peer.call(userId, stream) 
+    const video = document.createElement("video") 
+    call.on("stream", (userVideoStream) => {
+        addVideoStream(video, userVideoStream) 
+    }) 
+} 
+
+function addVideoStream(video, stream) {
+    video.srcObject = stream 
+    video.addEventListener("loadedmetadata", () => {
+        video.play() 
+        let html = `
+            <div class="user-container">
+                ${video.outerHTML}
+            </div>
+        `
+        $("#users").append(html)
+    }) 
+} 
+
+$(function () {
+    $("#mute_button").click(function () {
+        const enabled = myStream.getAudioTracks()[0].enabled 
+        if (enabled) {
+            myStream.getAudioTracks()[0].enabled = false 
+            html = `<i class="fas fa-microphone-slash"></i>` 
+            $("#mute_button").toggleClass("background_red") 
+            $("#mute_button").html(html)
+        } else {
+            myStream.getAudioTracks()[0].enabled = true 
+            html = `<i class="fas fa-microphone"></i>` 
+            $("#mute_button").toggleClass("background_red") 
+            $("#mute_button").html(html)
+        }
+    })
+})
+
+peer.on("open", (id) => {
+    socket.emit("join-room", ROOM_ID, id) 
+}) 
